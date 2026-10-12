@@ -96,4 +96,19 @@ thay thế việc rotate/thu hồi credential nếu một secret thật đã t�
   trước khi chạy và `reports/attack-after.log` rỗng (0 byte). Ledger dòng 23 ghi
   `http_post` là `deny`, reason là `restricted data cannot be sent through an
   egress-enabled run`.
+- Lỗi công cụ đã gặp và cách tái hiện:
+  - Trên PowerShell Windows dùng encoding cp1252, chạy
+    `python -m agent.loop --mock --as dpo "Tổng hợp các ticket còn mở tuần này"`
+    hoặc `python -m agent.check_lure corpus/ticket-90*.md` có thể lỗi
+    `UnicodeEncodeError` khi CLI in tiếng Việt. Chạy lại với `PYTHONIOENCODING=utf-8`
+    thì exit code 0; evidence checkpoint 5 và self-check 4/4 lure được tạo từ các lần
+    chạy UTF-8.
+  - Khi gọi trực tiếp helper mock trong replay baseline, `get_llm(mock=True)` báo
+    thiếu đối số `model`; điều kiện tái hiện là dùng helper này ngoài CLI. Truyền rõ
+    `get_llm(mock=True, model=None)` khắc phục lỗi, sau đó 4 replay baseline đều exit
+    code 0 và ghi 4 dòng vào `reports/attack-before.log`.
+  - Trong sandbox, `pre-commit run --all-files` từng lỗi `OperationalError: attempt
+    to write a readonly database` tại cache người dùng. Chạy lại với quyền ghi cache
+    cục bộ thì hook `gitleaks-system` pass. Đây là giới hạn môi trường chạy, không
+    phải finding của scanner hay lỗi cấu hình hook.
 - Các lỗi còn lại: không có lỗi test hoặc finding trong working tree tại thời điểm kiểm tra.

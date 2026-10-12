@@ -1,8 +1,10 @@
 # Compliance mapping
 
-Mình đã đối chiếu nguồn gốc của các văn bản dưới đây. Bản này chỉ map control kỹ
-thuật trong lab vào chủ đề rủi ro liên quan; nó không phải ý kiến pháp lý hay kết
-luận hệ thống production đã tuân thủ một điều khoản cụ thể.
+Mình đã đối chiếu nguồn gốc, tên văn bản và thông tin hiệu lực của các tài liệu dưới
+đây. **Chưa xác minh điều khoản cụ thể** của Luật 91/2025/QH15, Nghị định
+356/2025/NĐ-CP và Luật 134/2025/QH15 để đưa ra kết luận áp dụng. Vì vậy, bản này chỉ
+map control kỹ thuật trong lab vào chủ đề rủi ro liên quan; nó không phải ý kiến pháp
+lý hay kết luận hệ thống production đã tuân thủ một điều khoản cụ thể.
 
 ## Nguồn đã đối chiếu
 
