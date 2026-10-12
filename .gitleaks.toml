@@ -3,6 +3,13 @@ title = "Day 24 synthetic secret exercise"
 [extend]
 useDefault = true
 
+# `gitleaks dir .` needs to evaluate the working tree only. Git objects are
+# deliberately handled by the separate history scan documented in checkpoint 4.
+[allowlist]
+paths = [
+  '''(^|/)(\.git|\.venv)/''',
+]
+
 [[rules]]
 id = "lab24-synthetic-token"
 description = "A deliberately invalid lab token; never use real credentials"

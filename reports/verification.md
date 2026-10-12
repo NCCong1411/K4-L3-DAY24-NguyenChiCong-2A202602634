@@ -69,6 +69,25 @@ Mình cũng tạo một ledger tạm gồm hai entry: trước khi sửa, `verif
 không tự phát hiện xoá dòng cuối hoặc ghi lại cả file với chain mới nếu không
 có một mốc hash tin cậy bên ngoài; đó là giới hạn của lab và đã được ghi nhận.
 
+## Checkpoint 4 — Supply chain và secret scanning
+
+Mình tạo `requirements.lock` bằng `pip-compile --generate-hashes` từ
+`requirements.txt`. File lock có hash SHA-256 cho toàn bộ dependency đã resolve,
+bao gồm `requests` và `pytest`. Lệnh `python -m pip install --require-hashes -r
+requirements.lock` chạy thành công, nên môi trường không cài một bản package không
+nằm trong lock hoặc không khớp hash.
+
+Gitleaks được dùng ở phiên bản `8.30.1`. Quét working tree bằng cấu hình của repo
+trả exit code 0, không có finding. Quét lịch sử có đúng một finding mô phỏng tại
+commit `1bdd849922156c868a5ee9293d68f5b72e242d2c`: file `lab-fake-secret.txt`, rule
+`lab24-synthetic-token`, exit code 1 như kỳ vọng. Giá trị bị redact trong output và
+không phải credential thật; chi tiết cùng hướng xử lý nếu đây là secret thật nằm ở
+`reports/secrets-incident.md`.
+
+Mình cũng chạy `pre-commit run --all-files`; hook `gitleaks-system` từ repository
+Gitleaks chính thức pass. Hook giúp chặn secret mới trước khi commit, nhưng không
+thay thế việc rotate/thu hồi credential nếu một secret thật đã từng bị lộ.
+
 - OS / Python / Gitleaks version:
 - `python -m pytest tests/ -q`:
 - `pre-commit run --all-files`:
