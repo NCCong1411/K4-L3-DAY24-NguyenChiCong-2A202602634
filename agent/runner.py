@@ -59,10 +59,18 @@ Interface bắt buộc (agent/loop.py import và gọi hàm này nếu tồn t�
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from agent import ledger, tools
+from agent.policy import PolicyContext, check
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 DEFAULT_LEDGER_PATH = REPORTS_DIR / "ledger.jsonl"
+AGENT_SCOPES = ("search_docs", "read_customer")
 
 
 class RunnerScaffoldPending(NotImplementedError):
@@ -71,4 +79,75 @@ class RunnerScaffoldPending(NotImplementedError):
 
 def handle(message: str, llm, log_dir: Path | None = None,
            principal_id: str = "support_l1") -> str:
-    raise RunnerScaffoldPending("BƯỚC 3c: implement trifecta split")
+    """Run the OBO boundary checks before any tool touches customer data."""
+    run_id = str(uuid.uuid4())
+    agent_id = "lab24-agent"
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    ledger_path = (log_dir / "ledger.jsonl") if log_dir else DEFAULT_LEDGER_PATH
+
+    def call_tool(
+        *,
+        tool_name: str,
+        args: dict,
+        classification: str,
+        purpose: str,
+        egress_enabled: bool,
+        execute,
+    ):
+        context = PolicyContext(
+            data_classification=classification,
+            request_purpose=purpose,
+            agent_owner=f"{agent_id}/{run_id}",
+            delegation_depth=0,
+            egress_enabled=egress_enabled,
+            principal_id=principal_id,
+            requested_tool=tool_name,
+            agent_scopes=AGENT_SCOPES,
+            parent_scopes=(),
+            expires_at=expires_at,
+        )
+        allowed, reason = check(context)
+        args_hash = hashlib.sha256(
+            json.dumps(args, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        ledger.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "agent_id": agent_id,
+                "run_id": run_id,
+                "tool": tool_name,
+                "args_hash": args_hash,
+                "classification": classification,
+                "decision": "allow" if allowed else "deny",
+                "reason": reason,
+                "on_behalf_of": principal_id,
+                "expires_at": expires_at,
+            },
+            ledger_path,
+        )
+        return execute() if allowed else None
+
+    docs = call_tool(
+        tool_name="search_docs",
+        args={"query": message},
+        classification="internal",
+        purpose="summarize-tickets",
+        egress_enabled=False,
+        execute=lambda: tools.search_docs(message),
+    )
+    if docs is None:
+        return "Yêu cầu không được phép thực hiện với principal hiện tại."
+
+    injected = llm.find_injection("\n\n".join(doc["text"] for doc in docs))
+    if injected is not None:
+        for customer_id in injected.customer_ids:
+            call_tool(
+                tool_name="read_customer",
+                args={"customer_id": customer_id},
+                classification="restricted",
+                purpose="support-reply",
+                egress_enabled=False,
+                execute=lambda customer_id=customer_id: tools.read_customer(customer_id),
+            )
+
+    return llm.summarize(docs)

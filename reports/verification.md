@@ -28,6 +28,19 @@ chặn cùng call đó; purpose sai, TTL hết hạn và agent con có scope vư
 đều bị deny với reason cụ thể. Đây là authorization mô phỏng trong lab, không
 phải cơ chế xác thực production.
 
+## Checkpoint 3c — On-behalf-of (OBO)
+
+Mình chạy `python -m pytest tests/test_obo.py -v`; cả 5 test đều pass. Runner
+tạo `run_id` và expiry UTC cho mỗi lần chạy, sau đó kiểm policy ngay trước từng
+tool call. Với cùng query có lure, `support_l1` vẫn có entry deny trong ledger
+nhưng không hề chạm vào `read_customer`; DPO hợp lệ vẫn đọc được record gắn với
+ticket và các entry đều có `on_behalf_of`, `agent_id`, `run_id`, `expires_at`.
+
+Phần `append()` của ledger được bổ sung sớm để có audit evidence cho OBO. Ở
+checkpoint ledger sau, mình sẽ hoàn thiện `verify()` và kiểm tra đầy đủ hash
+chain/tampering. Split để không dùng customer ID từ free text sẽ được thực hiện
+ở checkpoint trifecta tiếp theo.
+
 - OS / Python / Gitleaks version:
 - `python -m pytest tests/ -q`:
 - `pre-commit run --all-files`:
