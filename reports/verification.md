@@ -56,6 +56,19 @@ Khi thấy injection, runner ghi một attempt egress riêng với record count 
 vì payload; policy deny call `http_post` trước khi tool chạy nên không có PII
 đến sink.
 
+## Checkpoint 3e — Tamper-evident ledger
+
+Mình chạy `python -m pytest tests/test_ledger.py -v`; cả 3 test đều pass.
+Mỗi dòng JSONL có `prev_hash` và `hash` SHA-256 tính từ JSON canonical, còn
+`verify()` kiểm reason, liên kết với dòng trước và hash đã lưu. Ledger chỉ giữ
+`args_hash`, không ghi argument hoặc PII thô.
+
+Mình cũng tạo một ledger tạm gồm hai entry: trước khi sửa, `verify()` trả
+`True`; sau khi đổi field `tool` của dòng đầu mà không tính lại hash, hàm trả
+`False`. Hash chain này chỉ phát hiện sửa/chèn trong phần file còn lại. Nó
+không tự phát hiện xoá dòng cuối hoặc ghi lại cả file với chain mới nếu không
+có một mốc hash tin cậy bên ngoài; đó là giới hạn của lab và đã được ghi nhận.
+
 - OS / Python / Gitleaks version:
 - `python -m pytest tests/ -q`:
 - `pre-commit run --all-files`:

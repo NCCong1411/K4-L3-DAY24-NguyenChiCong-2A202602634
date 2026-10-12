@@ -71,4 +71,27 @@ def append(entry: dict, path: Path) -> dict:
 
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    """Verify every remaining JSONL entry against its predecessor."""
+    if not path.exists():
+        return False
+
+    expected_previous = GENESIS_HASH
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            if not line.strip():
+                return False
+            entry = json.loads(line)
+            if not isinstance(entry, dict) or not entry.get("reason"):
+                return False
+            stored_hash = entry.get("hash")
+            if not isinstance(stored_hash, str):
+                return False
+            if entry.get("prev_hash") != expected_previous:
+                return False
+            if stored_hash != _hash_entry(entry):
+                return False
+            expected_previous = stored_hash
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return False
+    return True
