@@ -34,7 +34,14 @@ không phải xác thực người dùng production.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+PRINCIPALS_FILE = Path(__file__).resolve().parent.parent / "data" / "principals.json"
+VALID_CLASSIFICATIONS = {"public", "internal", "restricted"}
 
 
 @dataclass(frozen=True)
@@ -52,4 +59,54 @@ class PolicyContext:
 
 
 def check(context: PolicyContext) -> tuple[bool, str]:
-    raise NotImplementedError("BƯỚC 3b: implement policy check")
+    """Decide whether one pending tool call is authorized.
+
+    The policy defaults to denial.  Every return includes a short reason so a
+    caller can write a complete audit entry for both allowed and denied calls.
+    """
+    # This minimum rule is intentionally evaluated before OBO checks: even a
+    # fully authorized principal must not combine restricted data and egress.
+    if context.data_classification == "restricted" and context.egress_enabled:
+        return False, "restricted data cannot be sent through an egress-enabled run"
+
+    if context.data_classification not in VALID_CLASSIFICATIONS:
+        return False, f"unknown data classification: {context.data_classification!r}"
+    if context.delegation_depth < 0:
+        return False, "delegation depth cannot be negative"
+    if not context.principal_id:
+        return False, "missing principal identity"
+    if not context.requested_tool:
+        return False, "missing requested tool"
+    if not context.request_purpose:
+        return False, "missing request purpose"
+
+    try:
+        principals = json.loads(PRINCIPALS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False, "principal source is unavailable or invalid"
+
+    principal = principals.get(context.principal_id)
+    if not isinstance(principal, dict):
+        return False, f"unknown principal: {context.principal_id!r}"
+
+    if context.request_purpose not in set(principal.get("purposes", ())):
+        return False, "request purpose is not authorized for this principal"
+    if context.requested_tool not in set(principal.get("allowed_tools", ())):
+        return False, "requested tool is not authorized for this principal"
+    if context.requested_tool not in set(context.agent_scopes):
+        return False, "requested tool is outside the agent scope"
+
+    if context.delegation_depth > 0:
+        if context.requested_tool not in set(context.parent_scopes):
+            return False, "requested tool is outside the parent scope"
+
+    try:
+        expires_at = datetime.fromisoformat(context.expires_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return False, "missing or invalid run expiry"
+    if expires_at.tzinfo is None:
+        return False, "run expiry must include a UTC offset"
+    if expires_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+        return False, "run has expired"
+
+    return True, "principal, purpose and effective scopes authorize this tool call"
