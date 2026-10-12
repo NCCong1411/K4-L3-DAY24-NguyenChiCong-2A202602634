@@ -88,8 +88,12 @@ Mình cũng chạy `pre-commit run --all-files`; hook `gitleaks-system` từ rep
 Gitleaks chính thức pass. Hook giúp chặn secret mới trước khi commit, nhưng không
 thay thế việc rotate/thu hồi credential nếu một secret thật đã từng bị lộ.
 
-- OS / Python / Gitleaks version:
-- `python -m pytest tests/ -q`:
-- `pre-commit run --all-files`:
-- Ledger verify:
-- Các lỗi còn lại:
+- OS / Python / Gitleaks version: Windows; Python 3.11.9; Gitleaks 8.30.1.
+- `python -m pytest tests/ -q`: 33 passed.
+- `pre-commit run --all-files`: pass (`gitleaks-system`).
+- Ledger verify: `True` với `reports/ledger.jsonl` sau lần replay checkpoint 5.
+- Checkpoint 5 replay: chạy đúng query ban đầu với `--mock --as dpo`; sink được reset
+  trước khi chạy và `reports/attack-after.log` rỗng (0 byte). Ledger dòng 23 ghi
+  `http_post` là `deny`, reason là `restricted data cannot be sent through an
+  egress-enabled run`.
+- Các lỗi còn lại: không có lỗi test hoặc finding trong working tree tại thời điểm kiểm tra.
