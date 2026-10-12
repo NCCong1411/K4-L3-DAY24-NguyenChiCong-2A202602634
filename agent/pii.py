@@ -30,10 +30,71 @@ set ở tests/vn_pii_testset.jsonl):
 """
 from __future__ import annotations
 
+import re
+
+
+_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9_%+-])"
+)
+_CCCD_LABEL_RE = re.compile(
+    r"\bCCCD\b\s*(?:của\s+[^:,.]+)?\s*[:\-]?\s*(?P<value>\d{12})(?!\d)",
+    re.IGNORECASE,
+)
+_CCCD_RE = re.compile(r"(?<!\d)\d{12}(?!\d)")
+_PHONE_RE = re.compile(r"(?<!\d)0(?:[\s-]?\d){9,10}(?!\d)")
+_BANK_ACCOUNT_RE = re.compile(
+    r"(?:\bSTK\b|số\s+tài\s+khoản)\s*(?:là|:|\-)?\s*(?P<value>\d(?:[\s-]?\d){7,15})(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def _entity(entity_type: str, match: re.Match[str], group: str | None = None) -> dict:
+    """Build one entity from a whole match or a named value group."""
+    start, end = match.span(group) if group else match.span()
+    return {"type": entity_type, "start": start, "end": end}
+
+
+def _overlaps(first: dict, second: dict) -> bool:
+    return first["start"] < second["end"] and second["start"] < first["end"]
+
 
 def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
+    """Return detected Vietnamese PII with offsets into ``text``.
+
+    Account numbers are matched with their labels first.  This is important
+    because a 12-digit account number otherwise looks exactly like a CCCD.
+    The final overlap pass keeps the more specific match and returns entities
+    in text order for predictable redaction.
+    """
+    candidates: list[tuple[int, dict]] = []
+
+    # Larger priority values win when two recognizers cover the same text.
+    for match in _BANK_ACCOUNT_RE.finditer(text):
+        candidates.append((40, _entity("VN_BANK_ACCOUNT", match, "value")))
+    for match in _CCCD_LABEL_RE.finditer(text):
+        candidates.append((30, _entity("VN_CCCD", match, "value")))
+    for match in _EMAIL_RE.finditer(text):
+        candidates.append((20, _entity("EMAIL", match)))
+    for match in _PHONE_RE.finditer(text):
+        candidates.append((20, _entity("VN_PHONE", match)))
+    for match in _CCCD_RE.finditer(text):
+        candidates.append((10, _entity("VN_CCCD", match)))
+
+    accepted: list[dict] = []
+    for _, candidate in sorted(
+        candidates,
+        key=lambda item: (-item[0], item[1]["start"], item[1]["end"]),
+    ):
+        if not any(_overlaps(candidate, existing) for existing in accepted):
+            accepted.append(candidate)
+
+    return sorted(accepted, key=lambda entity: (entity["start"], entity["end"]))
 
 
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    """Replace every detected entity without invalidating later offsets."""
+    redacted = text
+    for entity in reversed(detect(text)):
+        replacement = f"[REDACTED_{entity['type']}]"
+        redacted = redacted[:entity["start"]] + replacement + redacted[entity["end"]:]
+    return redacted
