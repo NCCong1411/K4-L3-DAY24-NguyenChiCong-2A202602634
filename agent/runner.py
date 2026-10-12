@@ -61,16 +61,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agent import ledger, tools
+from agent.pii import redact
 from agent.policy import PolicyContext, check
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 DEFAULT_LEDGER_PATH = REPORTS_DIR / "ledger.jsonl"
-AGENT_SCOPES = ("search_docs", "read_customer")
+TICKET_NAME_RE = re.compile(r"^ticket-(\d+)(?:[a-z]+)?\.md$", re.IGNORECASE)
 
 
 class RunnerScaffoldPending(NotImplementedError):
@@ -79,14 +81,20 @@ class RunnerScaffoldPending(NotImplementedError):
 
 def handle(message: str, llm, log_dir: Path | None = None,
            principal_id: str = "support_l1") -> str:
-    """Run the OBO boundary checks before any tool touches customer data."""
-    run_id = str(uuid.uuid4())
+    """Contain untrusted documents before a private customer lookup.
+
+    Run A handles corpus text and emits only integer ticket IDs.  Run B maps
+    those IDs through the trusted fixture before it can call read_customer.
+    No free text from a document crosses this boundary.
+    """
     agent_id = "lab24-agent"
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     ledger_path = (log_dir / "ledger.jsonl") if log_dir else DEFAULT_LEDGER_PATH
 
     def call_tool(
         *,
+        run_id: str,
+        agent_scopes: tuple[str, ...],
         tool_name: str,
         args: dict,
         classification: str,
@@ -102,7 +110,7 @@ def handle(message: str, llm, log_dir: Path | None = None,
             egress_enabled=egress_enabled,
             principal_id=principal_id,
             requested_tool=tool_name,
-            agent_scopes=AGENT_SCOPES,
+            agent_scopes=agent_scopes,
             parent_scopes=(),
             expires_at=expires_at,
         )
@@ -127,7 +135,12 @@ def handle(message: str, llm, log_dir: Path | None = None,
         )
         return execute() if allowed else None
 
+    # Run A: untrusted corpus only.  It may inspect documents but has neither
+    # private-store nor egress capability.
+    run_a_id = f"run-a-{uuid.uuid4()}"
     docs = call_tool(
+        run_id=run_a_id,
+        agent_scopes=("search_docs",),
         tool_name="search_docs",
         args={"query": message},
         classification="internal",
@@ -138,16 +151,58 @@ def handle(message: str, llm, log_dir: Path | None = None,
     if docs is None:
         return "Yêu cầu không được phép thực hiện với principal hiện tại."
 
-    injected = llm.find_injection("\n\n".join(doc["text"] for doc in docs))
-    if injected is not None:
-        for customer_id in injected.customer_ids:
-            call_tool(
-                tool_name="read_customer",
-                args={"customer_id": customer_id},
-                classification="restricted",
-                purpose="support-reply",
-                egress_enabled=False,
-                execute=lambda customer_id=customer_id: tools.read_customer(customer_id),
-            )
+    # Detection stays in Run A.  Its extracted customer IDs and target URL are
+    # intentionally discarded rather than being passed into Run B.
+    injection_seen = llm.find_injection("\n\n".join(doc["text"] for doc in docs)) is not None
+    ticket_ids = sorted(
+        {
+            int(match.group(1))
+            for doc in docs
+            if (match := TICKET_NAME_RE.fullmatch(doc["id"])) is not None
+        }
+    )
+    summary_docs = [{"id": doc["id"], "text": redact(doc["text"])} for doc in docs]
 
-    return llm.summarize(docs)
+    # Run B receives only typed ticket IDs.  The customer mapping is derived
+    # from the trusted related_tickets field, never from document text.
+    customers = json.loads(tools.CUSTOMERS_FILE.read_text(encoding="utf-8"))
+    customer_ids = sorted(
+        {
+            str(customer["customer_id"])
+            for customer in customers
+            if any(ticket_id in customer.get("related_tickets", ()) for ticket_id in ticket_ids)
+        }
+    )
+    run_b_id = f"run-b-{uuid.uuid4()}"
+    records = []
+    for customer_id in customer_ids:
+        record = call_tool(
+            run_id=run_b_id,
+            agent_scopes=("read_customer",),
+            tool_name="read_customer",
+            args={"customer_id": customer_id},
+            classification="restricted",
+            purpose="support-reply",
+            egress_enabled=False,
+            execute=lambda customer_id=customer_id: tools.read_customer(customer_id),
+        )
+        if record is not None:
+            records.append(record)
+
+    # A separate egress run records the attempted exfiltration without ever
+    # executing it.  It receives no untrusted text and only a record count.
+    if injection_seen:
+        call_tool(
+            run_id=f"run-c-{uuid.uuid4()}",
+            agent_scopes=("http_post",),
+            tool_name="http_post",
+            args={"record_count": len(records)},
+            classification="restricted",
+            purpose="support-reply",
+            egress_enabled=True,
+            execute=lambda: tools.http_post(
+                "http://127.0.0.1:10024/reconcile", {"records": records}
+            ),
+        )
+
+    return llm.summarize(summary_docs)

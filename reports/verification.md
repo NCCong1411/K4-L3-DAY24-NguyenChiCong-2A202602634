@@ -41,6 +41,21 @@ checkpoint ledger sau, mình sẽ hoàn thiện `verify()` và kiểm tra đầy
 chain/tampering. Split để không dùng customer ID từ free text sẽ được thực hiện
 ở checkpoint trifecta tiếp theo.
 
+## Checkpoint 3d — Trifecta split và containment
+
+Runner bây giờ tách việc xử lý thành các run có phạm vi riêng. Run A chỉ tìm
+và đọc corpus; dữ liệu duy nhất đi sang Run B là ticket ID dạng số lấy từ tên
+file. Run B tra `related_tickets` từ fixture trusted rồi mới xin quyền đọc
+customer. Customer ID, URL và text trong lure bị bỏ lại ở Run A. Trước khi trả
+summary, nội dung document cũng đi qua `redact()`.
+
+Mình chạy `tests/test_split.py`, `tests/test_injection.py` và `tests/test_obo.py`.
+Tất cả đều pass: khách `KH-000777` chỉ có trong free text không bị đọc, 4 lure
+đều bị chặn dưới cả `support_l1` lẫn DPO, còn customer hợp lệ vẫn được DPO đọc.
+Khi thấy injection, runner ghi một attempt egress riêng với record count thay
+vì payload; policy deny call `http_post` trước khi tool chạy nên không có PII
+đến sink.
+
 - OS / Python / Gitleaks version:
 - `python -m pytest tests/ -q`:
 - `pre-commit run --all-files`:
